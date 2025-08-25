@@ -47,17 +47,94 @@ function secondsToMmSs(sec) {
 }
 function speak(text) { try { const u = new SpeechSynthesisUtterance(text); u.rate = 1.05; speechSynthesis.cancel(); speechSynthesis.speak(u); } catch {} }
 
-function ping(a = 0.15, b, c) {
+
+const __audio = { ctx: null, master: null, unlocked: false };
+
+function ensureAudio() {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return null;
+  if (!__audio.ctx || __audio.ctx.state === "closed") {
+    const ctx = new AC();
+    const master = ctx.createGain();
+    master.gain.value = 1;
+    master.connect(ctx.destination);
+    __audio.ctx = ctx;
+    __audio.master = master;
+  }
+  return __audio;
+}
+
+// Call from a user gesture before first ping (e.g., Start button)
+async function unlockAudio() {
   try {
-    let volume, freq, duration;
-    if (typeof a === "object" && a !== null) { ({ volume = 0.15, freq = 880, duration = 180 } = a); }
-    else { volume = a ?? 0.15; freq = b ?? 880; duration = c ?? 180; }
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const o = ctx.createOscillator(); const g = ctx.createGain();
-    o.type = "sine"; o.frequency.setValueAtTime(freq, ctx.currentTime);
-    g.gain.value = volume; o.connect(g).connect(ctx.destination); o.start();
-    setTimeout(() => { o.stop(); ctx.close(); }, duration);
+    const a = ensureAudio();
+    if (!a || !a.ctx) return;
+    if (a.ctx.state !== "running") {
+      await a.ctx.resume();
+    }
+    if (!__audio.unlocked) {
+      // iOS/Safari: prime output with a tiny silent buffer
+      const bs = a.ctx.createBufferSource();
+      bs.buffer = a.ctx.createBuffer(1, 1, 22050);
+      bs.connect(a.ctx.destination);
+      bs.start(0);
+      __audio.unlocked = true;
+    }
   } catch {}
+}
+function ping(a = 0.4, b, c) {
+  try {
+    const audio = ensureAudio();
+    if (!audio || !audio.ctx) return false;
+
+    let volume, freq, durationMs;
+    if (typeof a === "object" && a !== null) {
+      ({ volume = 0.4, freq = 880, duration: durationMs = 180 } = a);
+    } else {
+      volume = a ?? 0.4;
+      freq = b ?? 880;
+      durationMs = c ?? 180;
+    }
+
+    const startTone = () => {
+      const ctx = audio.ctx;
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+
+      const now = ctx.currentTime;
+      const startAt = now + 0.02;              // small offset so first tone isn't clipped
+      const dur = Math.max(0.01, durationMs / 1000);
+
+      o.type = "sine";
+      o.frequency.setValueAtTime(freq, startAt);
+
+      // smooth envelope (prevents clicks & ensures audibility)
+      g.gain.setValueAtTime(0, startAt);
+      g.gain.linearRampToValueAtTime(volume, startAt + 0.015);
+      g.gain.linearRampToValueAtTime(0, startAt + dur);
+
+      o.connect(g).connect(audio.master);
+      o.start(startAt);
+      o.stop(startAt + dur + 0.02);
+    };
+
+    // If context isn’t running yet, resume first and then start the tone
+    if (audio.ctx.state !== "running") {
+      const p = audio.ctx.resume?.();
+      if (p && typeof p.then === "function") {
+        p.then(startTone).catch(() => {});
+      } else {
+        // Best effort fallback if resume isn’t a promise
+        setTimeout(startTone, 20);
+      }
+    } else {
+      startTone();
+    }
+
+    return true; // keep return type stable for your self-tests
+  } catch {
+    return false;
+  }
 }
 
 function ensureNotificationPermission() {
@@ -133,25 +210,35 @@ export default function App() {
     intervalRef.current = setInterval(() => {
       setRemaining((r) => {
         const next = r - 1;
-        if (state === "break" && settings.sound && r > 0) ping(0.12);
+        if (state === "break" && settings.sound && r > 0){
+          if(r == 1){
+            ping();
+            setTimeout(() => ping(), 120);
+          }else {
+            ping();
+          }
+        }
         const f = computePreBreakTone(state, settings.sound, next);
-        if (f) ping({ freq: f, volume: 0.12, duration: 120 });
+        if (f){
+          if(r == 2){
+            ping({ freq: f, volume: 0.3, duration: 100 });
+            setTimeout(() => ping({ freq: f, volume: 0.3, duration: 100 }), 120);
+          }else {
+            ping({ freq: f, duration: 120 });
+          }
+        }
         return next;
       });
       const now = Date.now();
       if (settings.hydrationNudgeMin && now - lastHydration > settings.hydrationNudgeMin * 60000) {
-        if (settings.notifications) notify("Hydration check", "Take a sip of water");
-        if (settings.sound) ping(0.1);
-        setLastHydration(now);
+        notify("Hydration check", "Take a sip of water"); if (settings.sound) ping(0.1); setLastHydration(now);
       }
       if (settings.postureNudgeMin && now - lastPosture > settings.postureNudgeMin * 60000) {
-        if (settings.notifications) notify("Posture check", "Relax shoulders, ears over shoulders, feet flat");
-        if (settings.sound) ping(0.1);
-        setLastPosture(now);
+        notify("Posture check", "Relax shoulders, ears over shoulders, feet flat"); if (settings.sound) ping(0.1); setLastPosture(now);
       }
     }, 1000);
     return () => clearInterval(intervalRef.current);
-  }, [state, settings.hydrationNudgeMin, settings.postureNudgeMin, settings.sound, settings.notifications, lastHydration, lastPosture]);
+  }, [state, settings.hydrationNudgeMin, settings.postureNudgeMin, settings.sound]);
 
   useEffect(() => {
     if (state === "idle" || state === "paused") return;
@@ -177,7 +264,7 @@ export default function App() {
   function remind(title, body, opts = {}) {
     const { sound = true } = opts; if (sound && settings.sound) ping(); if (settings.notifications) notify(title, body); if (settings.voice) speak(`${title}. ${body}.`);
   }
-  function start() { setState("focus"); setRemaining(settings.focusMin * 60); startedRef.current = true; if (settings.notifications) ensureNotificationPermission(); }
+  function start() { unlockAudio(); setState("focus"); setRemaining(settings.focusMin * 60); startedRef.current = true; if (settings.notifications) ensureNotificationPermission(); }
 
   function pause() { setState("paused"); }
   function resume() { setState("focus"); }
@@ -209,6 +296,11 @@ export default function App() {
   return (
     <TooltipProvider>
       <div className="min-h-screen w-full bg-gradient-to-b from-white to-slate-50 dark:from-slate-900 dark:to-slate-950 text-slate-900 dark:text-slate-100 transition-colors">
+        <Button onClick={() => {
+          // ping(0.4);
+            ping({ freq: 2500, volume: 0.3, duration: 80 });
+            setTimeout(() => ping({ freq: 2500, volume: 0.3, duration: 80 }), 120);
+        }}>TEST PING</Button>
         <header className="sticky top-0 z-30 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-slate-900/60 border-b border-slate-200/60 dark:border-slate-800">
           <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between">
             <div className="flex items-center gap-3">
