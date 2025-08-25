@@ -140,14 +140,18 @@ export default function App() {
       });
       const now = Date.now();
       if (settings.hydrationNudgeMin && now - lastHydration > settings.hydrationNudgeMin * 60000) {
-        notify("Hydration check", "Take a sip of water"); if (settings.sound) ping(0.1); setLastHydration(now);
+        if (settings.notifications) notify("Hydration check", "Take a sip of water");
+        if (settings.sound) ping(0.1);
+        setLastHydration(now);
       }
       if (settings.postureNudgeMin && now - lastPosture > settings.postureNudgeMin * 60000) {
-        notify("Posture check", "Relax shoulders, ears over shoulders, feet flat"); if (settings.sound) ping(0.1); setLastPosture(now);
+        if (settings.notifications) notify("Posture check", "Relax shoulders, ears over shoulders, feet flat");
+        if (settings.sound) ping(0.1);
+        setLastPosture(now);
       }
     }, 1000);
     return () => clearInterval(intervalRef.current);
-  }, [state, settings.hydrationNudgeMin, settings.postureNudgeMin, settings.sound]);
+  }, [state, settings.hydrationNudgeMin, settings.postureNudgeMin, settings.sound, settings.notifications, lastHydration, lastPosture]);
 
   useEffect(() => {
     if (state === "idle" || state === "paused") return;
