@@ -55,11 +55,8 @@ function ping(a = 0.15, b, c) {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const o = ctx.createOscillator(); const g = ctx.createGain();
     o.type = "sine"; o.frequency.setValueAtTime(freq, ctx.currentTime);
-    g.gain.value = volume; o.connect(g).connect(ctx.destination);
-    ctx.resume().then(() => {
-      o.start();
-      setTimeout(() => { o.stop(); ctx.close(); }, duration);
-    });
+    g.gain.value = volume; o.connect(g).connect(ctx.destination); o.start();
+    setTimeout(() => { o.stop(); ctx.close(); }, duration);
   } catch {}
 }
 
