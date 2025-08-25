@@ -47,16 +47,19 @@ function secondsToMmSs(sec) {
 }
 function speak(text) { try { const u = new SpeechSynthesisUtterance(text); u.rate = 1.05; speechSynthesis.cancel(); speechSynthesis.speak(u); } catch {} }
 
-function ping(a = 0.15, b, c) {
+let audioCtx;
+async function ping(a = 0.15, b, c) {
   try {
     let volume, freq, duration;
     if (typeof a === "object" && a !== null) { ({ volume = 0.15, freq = 880, duration = 180 } = a); }
     else { volume = a ?? 0.15; freq = b ?? 880; duration = c ?? 180; }
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const o = ctx.createOscillator(); const g = ctx.createGain();
-    o.type = "sine"; o.frequency.setValueAtTime(freq, ctx.currentTime);
-    g.gain.value = volume; o.connect(g).connect(ctx.destination); o.start();
-    setTimeout(() => { o.stop(); ctx.close(); }, duration);
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") await audioCtx.resume();
+    const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+    o.type = "sine"; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    g.gain.value = volume; o.connect(g).connect(audioCtx.destination);
+    o.start();
+    setTimeout(() => { o.stop(); }, duration);
   } catch {}
 }
 
